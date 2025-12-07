@@ -364,22 +364,39 @@ with tab_calc:
                 matrix_data.append(row)
             
             df_matrix = pd.DataFrame(matrix_data)
+            # インデックスを1から開始
+            df_matrix.index = df_matrix.index + 1
             st.dataframe(df_matrix, use_container_width=True)
 
-            # 6. コピー用
+            # 6. コピー用 (分割表示)
             st.markdown("---")
             st.subheader("📋 告知用コピーテキスト")
             
             fixed_names = [m['name'] for m in fixed_members]
-            text_output = f"【固定メンバー】 ({len(fixed_names)}名)\n{', '.join(fixed_names)}\n\n"
             
+            # ボックス1: 固定メンバー一覧
+            st.markdown("##### 🔰 固定メンバー一覧")
+            st.code(", ".join(fixed_names), language="text")
+            
+            st.markdown("##### 📅 日別参加メンバー (固定メンバー省略版)")
+            
+            # 日ごとのボックスを作成（2列で並べるなどのレイアウト調整も可能ですが、コピーしやすさ優先で縦に並べます）
             for d in target_dates:
                 d_str = d.strftime('%Y-%m-%d')
                 day_jp = ["月","火","水","木","金","土","日"][d.weekday()]
-                mems = daily_schedule.get(d_str, [])
-                text_output += f"■ {d.strftime('%m/%d')}({day_jp}) 参加メンバー ({len(mems)}名)\n{','.join(mems)}\n\n"
-            
-            st.text_area("以下のテキストを全選択してコピーしてください", text_output, height=300)
+                
+                # その日の全メンバーから、固定メンバーを除いたリストを作成
+                all_mems = daily_schedule.get(d_str, [])
+                variable_mems = [n for n in all_mems if n not in fixed_names]
+                
+                # 表示テキスト作成
+                header = f"{d.strftime('%m/%d')}({day_jp}) 合計{len(all_mems)}名"
+                body = f"固定メンバー、{', '.join(variable_mems)}"
+                
+                # 該当日のボックスを表示 (st.text_areaだと編集可、st.codeだとワンクリックコピー可)
+                # ここではコピーのしやすさを優先して st.code を使いますが、
+                # もし手動で微調整したい場合は st.text_area に変えてください。
+                st.text_area(header, value=body, height=68, key=f"txt_{d_str}")
 
 # -----------------
 # Tab 3: 一覧確認
