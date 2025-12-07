@@ -198,10 +198,9 @@ with tab_calc:
         if df.empty:
             st.error("データがありません。")
         else:
-            # データフレームから辞書形式に変換
+            # 1. データ準備
             members_dict = {}
             for _, row in df.iterrows():
-                # 列が存在しない場合のガード
                 ans = str(row.get('回答内容', 'いつでも'))
                 dates_str = str(row.get('指定日', ''))
                 
@@ -212,17 +211,18 @@ with tab_calc:
                     'specific_dates': dates_str.split(",") if dates_str else []
                 }
                 
-            # ロジック実行
+            # 2. 参加可否の判定 & ランキング作成
             ranked_members = []
             for name, data in members_dict.items():
                 availability = {}
                 for d in target_dates:
                     d_str = d.strftime('%Y-%m-%d')
                     is_ok = False
+                    # 判定ロジック
                     if data['answer'] == "いつでも": is_ok = True
                     elif "無理" in data['answer'] or "辞退" in data['answer']: is_ok = False
                     elif data['answer'] == "日にち指定" and d_str in data['specific_dates']: is_ok = True
-                    # スプレッドシートの手入力値などイレギュラーな値の処理（デフォルトはFalseにする）
+                    
                     availability[d_str] = is_ok
                 
                 ranked_members.append({
@@ -230,13 +230,14 @@ with tab_calc:
                     'progress_val': parse_stage(data['progress']),
                     'power_val': parse_power(data['power']),
                     'availability': availability,
-                    'count': 0
+                    'count': 0,
+                    'status': {} # 結果ステータス格納用
                 })
             
             # ソート: 進捗 > 戦力
             ranked_members.sort(key=lambda x: (x['progress_val'], x['power_val']), reverse=True)
             
-            # 選抜処理
+            # 3. 固定・変動の振り分け
             fixed_members = []
             variable_candidates = []
             all_dates_keys = [d.strftime('%Y-%m-%d') for d in target_dates]
@@ -247,40 +248,90 @@ with tab_calc:
                     fixed_members.append(m)
                 else:
                     variable_candidates.append(m)
-                    
+            
+            # 4. 日ごとの選抜処理
             daily_schedule = {}
+            
             for d in target_dates:
                 d_str = d.strftime('%Y-%m-%d')
-                todays_team = [fm['name'] for fm in fixed_members]
-                for fm in fixed_members: fm['count'] += 1
+                todays_team = []
                 
+                # (A) 固定メンバー
+                for fm in fixed_members:
+                    todays_team.append(fm['name'])
+                    fm['count'] += 1
+                    fm['status'][d_str] = "◎" # 固定選出
+                
+                # (B) 変動枠
                 slots_needed = 20 - len(todays_team)
+                
+                # その日の候補者
+                todays_candidates = [m for m in variable_candidates if m['availability'][d_str]]
+                
+                # 選抜漏れの人も含めてステータス初期化
+                for m in variable_candidates:
+                    if m['availability'][d_str]:
+                        m['status'][d_str] = "△" # 仮：参加可能だが未選出
+                    else:
+                        m['status'][d_str] = "✕" # 参加不可
+                
                 if slots_needed > 0:
-                    cands = [m for m in variable_candidates if m['availability'][d_str]]
+                    # モード別ソート
                     if mode == "平等モード":
-                        cands.sort(key=lambda x: (x['count'], -x['progress_val'][0], -x['progress_val'][1], -x['power_val']))
+                        todays_candidates.sort(key=lambda x: (x['count'], -x['progress_val'][0], -x['progress_val'][1], -x['power_val']))
+                    # 戦力優先なら既にranked_membersの順序のままでOK
                     
-                    for c in cands[:slots_needed]:
+                    # 枠埋め
+                    for c in todays_candidates[:slots_needed]:
                         todays_team.append(c['name'])
                         c['count'] += 1
-                daily_schedule[d_str] = todays_team
+                        c['status'][d_str] = "〇" # 変動選出
                 
-            # 結果表示
-            st.subheader("結果出力")
+                daily_schedule[d_str] = todays_team
+
+            # ------------------------------------------------
+            # 5. 結果表示（マトリクス表の作成）
+            # ------------------------------------------------
+            st.subheader("📊 選抜結果マトリクス表")
+            st.caption("記号の意味： ◎=固定枠, 〇=変動枠, △=選考漏れ, ✕=不参加")
+
+            # 表データの作成
+            matrix_data = []
+            # ランキング順（固定→変動上位...）に並べて表示
+            display_order = fixed_members + variable_candidates
             
-            # 固定メンバー表示
+            for m in display_order:
+                row = {"名前": m['name']}
+                # 各日付のステータスを埋める
+                for d in target_dates:
+                    d_str = d.strftime('%Y-%m-%d')
+                    # 日付ヘッダーを短くする (例: 12/07)
+                    short_date = d.strftime('%m/%d')
+                    row[short_date] = m['status'].get(d_str, "-")
+                
+                # 集計情報もあると便利
+                row["出撃数"] = m['count']
+                matrix_data.append(row)
+            
+            df_matrix = pd.DataFrame(matrix_data)
+            st.dataframe(df_matrix, use_container_width=True)
+
+            # ------------------------------------------------
+            # 6. コピー用テキスト出力
+            # ------------------------------------------------
+            st.markdown("---")
+            st.subheader("📋 告知用コピーテキスト")
+            
             fixed_names = [m['name'] for m in fixed_members]
-            st.info(f"🔰 固定メンバー ({len(fixed_names)}名): {', '.join(fixed_names)}")
+            text_output = f"【固定メンバー】 ({len(fixed_names)}名)\n{', '.join(fixed_names)}\n\n"
             
-            text_output = f"固定メンバー: {', '.join(fixed_names)}\n\n"
             for d in target_dates:
                 d_str = d.strftime('%Y-%m-%d')
                 day_jp = ["月","火","水","木","金","土","日"][d.weekday()]
                 mems = daily_schedule.get(d_str, [])
-                
-                text_output += f"{d.strftime('%m/%d')}({day_jp}) {len(mems)}名\n{','.join(mems)}\n\n"
+                text_output += f"■ {d.strftime('%m/%d')}({day_jp}) 参加メンバー ({len(mems)}名)\n{','.join(mems)}\n\n"
             
-            st.text_area("コピー用テキスト", text_output, height=400)
+            st.text_area("以下のテキストを全選択してコピーしてください", text_output, height=300)
 
 # -----------------
 # Tab 3: 一覧確認
