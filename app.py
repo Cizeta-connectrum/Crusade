@@ -35,20 +35,26 @@ def update_member_data(sheet_url, name, progress, power, answer, specific_dates,
     
     dates_str = ",".join(specific_dates)
     
+    # A列（名前の列）をすべて取得して、何行目にその名前があるか探す
+    # 1列目を取得
+    name_list = worksheet.col_values(1)
+    
     try:
-        cell = worksheet.find(name)
-        row = cell.row
-        # 更新
+        # リストの中に名前があれば、そのインデックスを取得（+1して行番号にする）
+        # name_listは0始まり、スプレッドシートは1始まりなので +1
+        row = name_list.index(name) + 1
+        
+        # 更新処理
         worksheet.update_cell(row, 2, progress)
         worksheet.update_cell(row, 3, power)
         worksheet.update_cell(row, 4, answer)
         worksheet.update_cell(row, 5, dates_str)
-        worksheet.update_cell(row, 6, now_str) # F列: 更新日時
-        # G列: 上限回数 (列が存在するか確認せずに書き込む簡易実装。7列目と想定)
-        worksheet.update_cell(row, 7, max_count) 
+        worksheet.update_cell(row, 6, now_str)
+        worksheet.update_cell(row, 7, max_count)
         return "更新"
-    except gspread.exceptions.CellNotFound:
-        # 新規追加
+        
+    except ValueError:
+        # index(name) で見つからなかった場合は ValueError になる -> 新規登録
         worksheet.append_row([name, progress, power, answer, dates_str, now_str, max_count])
         return "新規登録"
 
@@ -123,17 +129,21 @@ with tab_input:
     # 既存データ取得
     if select_mode == "既存メンバーを編集":
         if existing_names:
+            # keyを設定しないと、モード切替時に前の選択状態が残る場合があるため固定
             target_name = st.selectbox("名前を選択", existing_names)
             input_name = target_name
             if not df.empty:
-                row_data = df[df['名前'] == target_name].iloc[0]
-                current_data = {
-                    'progress': str(row_data.get('ステージ進捗', '')),
-                    'power': str(row_data.get('戦力', '')),
-                    'answer': str(row_data.get('回答内容', 'いつでも')),
-                    'dates': str(row_data.get('指定日', '')).split(",") if row_data.get('指定日') else [],
-                    'max_count': int(row_data.get('上限回数')) if pd.notna(row_data.get('上限回数')) and str(row_data.get('上限回数')).isdigit() else 14
-                }
+                # 該当メンバーのデータを取得
+                rows = df[df['名前'] == target_name]
+                if not rows.empty:
+                    row_data = rows.iloc[0]
+                    current_data = {
+                        'progress': str(row_data.get('ステージ進捗', '')),
+                        'power': str(row_data.get('戦力', '')),
+                        'answer': str(row_data.get('回答内容', 'いつでも')),
+                        'dates': str(row_data.get('指定日', '')).split(",") if row_data.get('指定日') else [],
+                        'max_count': int(row_data.get('上限回数')) if pd.notna(row_data.get('上限回数')) and str(row_data.get('上限回数')).isdigit() else 14
+                    }
         else:
             st.info("データがありません。「新規メンバー登録」を行ってください。")
     else:
@@ -143,14 +153,16 @@ with tab_input:
     st.markdown("---")
     
     # === 入力フォーム ===
-    # Session Stateを使って一時的なカレンダーチェック状態を管理
-    if 'temp_dates' not in st.session_state:
-        st.session_state['temp_dates'] = []
+    # メンバーごとに一意なキーを作成 (これがないと前の人の入力が残ってしまう)
+    # 新規登録時は名前入力中などキーが不安定になるのを防ぐため固定プレフィックス
+    form_key_suffix = f"_{input_name}" if input_name else "_new"
 
     # フォーム外で曜日選択などのインタラクションを行うためのエリア
     c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
-    new_progress = c1.text_input("ステージ進捗", value=current_data.get('progress', ''))
-    new_power = c2.text_input("戦力", value=current_data.get('power', ''))
+    
+    # 各ウィジェットに key 引数を追加して、メンバー変更時にリセットされるようにする
+    new_progress = c1.text_input("ステージ進捗", value=current_data.get('progress', ''), key=f"prog{form_key_suffix}")
+    new_power = c2.text_input("戦力", value=current_data.get('power', ''), key=f"pow{form_key_suffix}")
     
     # 回答タイプの選択
     options = ["いつでも", "条件付き", "無理/辞退"]
@@ -158,12 +170,12 @@ with tab_input:
     try:
         idx = options.index(current_ans) if current_ans in options else 0
     except: idx = 0
-    new_answer = c3.selectbox("回答タイプ", options, index=idx)
+    new_answer = c3.selectbox("回答タイプ", options, index=idx, key=f"ans{form_key_suffix}")
 
     # 回数制限
     default_max = current_data.get('max_count', 14)
     if new_answer == "無理/辞退": default_max = 0
-    new_max_count = c4.number_input("上限回数 (2-3回等の場合に入力)", min_value=0, max_value=14, value=default_max)
+    new_max_count = c4.number_input("上限回数", min_value=0, max_value=14, value=default_max, key=f"max{form_key_suffix}")
     st.caption("※「期間を通して2〜3回」の場合は、ここに「3」と入力してください。")
 
     # === カレンダーUI ===
@@ -175,15 +187,15 @@ with tab_input:
         # 曜日一括選択機能
         weekdays_map = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
         selected_weekdays = st.multiselect(
-            "曜日で一括チェック (例: 木曜日のみ)", 
+            "曜日で一括チェック", 
             options=list(weekdays_map.values()),
+            key=f"wd{form_key_suffix}",
             help="ここを選ぶと、下のカレンダーの該当する曜日が自動でチェックされます"
         )
         
-        # 初期値の計算 (DB保存値 OR 曜日選択)
+        # DB保存値
         db_dates = current_data.get('dates', [])
         
-        # カレンダーグリッド表示 (7列x2行程度)
         st.write("個別に日付を調整:")
         cols = st.columns(7)
         for i, d in enumerate(target_dates):
@@ -193,25 +205,23 @@ with tab_input:
             
             # チェックボックスの初期値判定
             is_checked = False
-            # 1. 曜日で指定されているか？
             if wd_str in selected_weekdays:
                 is_checked = True
-            # 2. 曜日指定がなく、DBに保存されているか？
             elif not selected_weekdays and d_str in db_dates:
                 is_checked = True
             
-            # グリッド配置
+            # グリッド配置 (キーにも名前を含めるのが重要)
             with cols[i % 7]:
-                if st.checkbox(label, value=is_checked, key=f"chk_{d_str}"):
+                if st.checkbox(label, value=is_checked, key=f"chk_{d_str}{form_key_suffix}"):
                     selected_dates_result.append(d_str)
 
     elif new_answer == "いつでも":
-        # 全日程を対象にする
         selected_dates_result = [d.strftime('%Y-%m-%d') for d in target_dates]
 
     # === 保存ボタン ===
     st.markdown("---")
-    if st.button("上記の内容で保存して更新", type="primary"):
+    # keyをつけないと、ボタン押下時にアプリ全体がリロードされて入力内容が飛ぶことがあるので注意
+    if st.button("上記の内容で保存して更新", type="primary", key=f"btn{form_key_suffix}"):
         if not input_name:
             st.error("エラー: メンバー名が入力されていません。")
         else:
@@ -219,10 +229,10 @@ with tab_input:
                 try:
                     res = update_member_data(sheet_url, input_name, new_progress, new_power, new_answer, selected_dates_result, new_max_count)
                     st.success(f"完了: {input_name} さんの情報を{res}しました！")
-                    st.cache_data.clear()
+                    st.cache_data.clear() # キャッシュクリアしてデータを再読み込みさせる
                 except Exception as e:
                     st.error(f"書き込みエラー: {e}")
-
+                    
 # -----------------
 # Tab 2: 選抜実行
 # -----------------
