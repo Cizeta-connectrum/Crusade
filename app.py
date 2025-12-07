@@ -378,9 +378,10 @@ with tab_calc:
             st.markdown("##### 🔰 固定メンバー一覧")
             st.code(", ".join(fixed_names), language="text")
             
-            st.markdown("##### 📅 日別参加メンバー (固定メンバー省略版)")
+            # 文言修正
+            st.markdown("##### 📅 日別参加メンバー")
             
-            # 日ごとのボックスを作成（2列で並べるなどのレイアウト調整も可能ですが、コピーしやすさ優先で縦に並べます）
+            # 日ごとのボックスを作成
             for d in target_dates:
                 d_str = d.strftime('%Y-%m-%d')
                 day_jp = ["月","火","水","木","金","土","日"][d.weekday()]
@@ -393,10 +394,9 @@ with tab_calc:
                 header = f"{d.strftime('%m/%d')}({day_jp}) 合計{len(all_mems)}名"
                 body = f"固定メンバー、{', '.join(variable_mems)}"
                 
-                # 該当日のボックスを表示 (st.text_areaだと編集可、st.codeだとワンクリックコピー可)
-                # ここではコピーのしやすさを優先して st.code を使いますが、
-                # もし手動で微調整したい場合は st.text_area に変えてください。
-                st.text_area(header, value=body, height=68, key=f"txt_{d_str}")
+                # 日付を見出しとして表示し、その下にコピーボタン付きボックス(st.code)を表示
+                st.text(header)
+                st.code(body, language="text")
 
 # -----------------
 # Tab 3: 一覧確認
