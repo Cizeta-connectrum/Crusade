@@ -35,16 +35,14 @@ def update_member_data(sheet_url, name, progress, power, answer, specific_dates,
     
     dates_str = ",".join(specific_dates)
     
-    # A列（名前の列）をすべて取得して、何行目にその名前があるか探す
-    # 1列目を取得
+    # A列（名前の列）をすべて取得して検索
     name_list = worksheet.col_values(1)
     
     try:
-        # リストの中に名前があれば、そのインデックスを取得（+1して行番号にする）
-        # name_listは0始まり、スプレッドシートは1始まりなので +1
+        # スプレッドシートは1行目が見出し、データは2行目から。col_valuesも1番目が1行目。
+        # リストのインデックス(0始まり) + 1 で行番号になる
         row = name_list.index(name) + 1
         
-        # 更新処理
         worksheet.update_cell(row, 2, progress)
         worksheet.update_cell(row, 3, power)
         worksheet.update_cell(row, 4, answer)
@@ -54,7 +52,7 @@ def update_member_data(sheet_url, name, progress, power, answer, specific_dates,
         return "更新"
         
     except ValueError:
-        # index(name) で見つからなかった場合は ValueError になる -> 新規登録
+        # 見つからない場合は新規登録
         worksheet.append_row([name, progress, power, answer, dates_str, now_str, max_count])
         return "新規登録"
 
@@ -79,14 +77,20 @@ def parse_power(power_val):
     except: return 0.0
 
 def generate_date_range(start_date, end_date):
+    """開始日から終了日までの日付リストを生成（日曜日は除外）"""
     delta = end_date - start_date
-    return [start_date + timedelta(days=i) for i in range(delta.days + 1)]
+    dates = []
+    for i in range(delta.days + 1):
+        d = start_date + timedelta(days=i)
+        if d.weekday() != 6: # 6は日曜日。日曜以外を追加
+            dates.append(d)
+    return dates
 
 # ---------------------------------------------------------
 # 3. アプリ画面構成
 # ---------------------------------------------------------
 st.set_page_config(page_title="聖戦管理App", layout="wide")
-st.title("🛡️ 聖戦メンバー管理 (多機能版)")
+st.title("🛡️ 聖戦メンバー管理 (日曜除外版)")
 
 # --- 設定 ---
 if "sheet_url" in st.secrets:
@@ -102,6 +106,8 @@ if not sheet_url:
 col_d1, col_d2 = st.sidebar.columns(2)
 start_date = col_d1.date_input("開始日", datetime.today())
 end_date = col_d2.date_input("終了日", datetime.today() + timedelta(days=13))
+
+# 日付リスト生成（日曜除外済み）
 target_dates = generate_date_range(start_date, end_date)
 
 # --- データ読み込み ---
@@ -129,11 +135,9 @@ with tab_input:
     # 既存データ取得
     if select_mode == "既存メンバーを編集":
         if existing_names:
-            # keyを設定しないと、モード切替時に前の選択状態が残る場合があるため固定
             target_name = st.selectbox("名前を選択", existing_names)
             input_name = target_name
             if not df.empty:
-                # 該当メンバーのデータを取得
                 rows = df[df['名前'] == target_name]
                 if not rows.empty:
                     row_data = rows.iloc[0]
@@ -142,29 +146,24 @@ with tab_input:
                         'power': str(row_data.get('戦力', '')),
                         'answer': str(row_data.get('回答内容', 'いつでも')),
                         'dates': str(row_data.get('指定日', '')).split(",") if row_data.get('指定日') else [],
-                        'max_count': int(row_data.get('上限回数')) if pd.notna(row_data.get('上限回数')) and str(row_data.get('上限回数')).isdigit() else 14
+                        'max_count': int(row_data.get('上限回数')) if pd.notna(row_data.get('上限回数')) and str(row_data.get('上限回数')).isdigit() else len(target_dates)
                     }
         else:
             st.info("データがありません。「新規メンバー登録」を行ってください。")
     else:
         input_name = st.text_input("新しいメンバー名を入力してください")
-        current_data = {'progress': "40-60", 'power': "", 'answer': "いつでも", 'dates': [], 'max_count': 14}
+        current_data = {'progress': "40-60", 'power': "", 'answer': "いつでも", 'dates': [], 'max_count': len(target_dates)}
 
     st.markdown("---")
     
     # === 入力フォーム ===
-    # メンバーごとに一意なキーを作成 (これがないと前の人の入力が残ってしまう)
-    # 新規登録時は名前入力中などキーが不安定になるのを防ぐため固定プレフィックス
     form_key_suffix = f"_{input_name}" if input_name else "_new"
 
-    # フォーム外で曜日選択などのインタラクションを行うためのエリア
     c1, c2, c3, c4 = st.columns([2, 2, 2, 2])
     
-    # 各ウィジェットに key 引数を追加して、メンバー変更時にリセットされるようにする
     new_progress = c1.text_input("ステージ進捗", value=current_data.get('progress', ''), key=f"prog{form_key_suffix}")
     new_power = c2.text_input("戦力", value=current_data.get('power', ''), key=f"pow{form_key_suffix}")
     
-    # 回答タイプの選択
     options = ["いつでも", "条件付き", "無理/辞退"]
     current_ans = current_data.get('answer', 'いつでも')
     try:
@@ -172,46 +171,47 @@ with tab_input:
     except: idx = 0
     new_answer = c3.selectbox("回答タイプ", options, index=idx, key=f"ans{form_key_suffix}")
 
-    # 回数制限
-    default_max = current_data.get('max_count', 14)
+    # 上限回数のデフォルト値（日曜除外後の日数）
+    max_limit = len(target_dates)
+    default_max = current_data.get('max_count', max_limit)
     if new_answer == "無理/辞退": default_max = 0
-    new_max_count = c4.number_input("上限回数", min_value=0, max_value=14, value=default_max, key=f"max{form_key_suffix}")
+    # 入力上限も日曜除外後の日数に合わせる
+    new_max_count = c4.number_input("上限回数", min_value=0, max_value=max_limit, value=default_max, key=f"max{form_key_suffix}")
     st.caption("※「期間を通して2〜3回」の場合は、ここに「3」と入力してください。")
 
     # === カレンダーUI ===
     selected_dates_result = []
     
     if new_answer == "条件付き":
-        st.markdown("##### 📅 参加可能日を選択")
+        st.markdown("##### 📅 参加可能日を選択 (日曜除く)")
         
-        # 曜日一括選択機能
-        weekdays_map = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土", 6: "日"}
+        # 曜日一括選択（日曜はリストから削除）
+        weekdays_map = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土"}
         selected_weekdays = st.multiselect(
             "曜日で一括チェック", 
             options=list(weekdays_map.values()),
             key=f"wd{form_key_suffix}",
-            help="ここを選ぶと、下のカレンダーの該当する曜日が自動でチェックされます"
+            help="日曜日は開催されないため除外されています"
         )
         
-        # DB保存値
         db_dates = current_data.get('dates', [])
         
         st.write("個別に日付を調整:")
-        cols = st.columns(7)
+        # 6列グリッドに変更 (日曜がないので6日で1行)
+        cols = st.columns(6)
         for i, d in enumerate(target_dates):
             d_str = d.strftime('%Y-%m-%d')
             wd_str = weekdays_map[d.weekday()]
             label = f"{d.strftime('%m/%d')}({wd_str})"
             
-            # チェックボックスの初期値判定
             is_checked = False
             if wd_str in selected_weekdays:
                 is_checked = True
             elif not selected_weekdays and d_str in db_dates:
                 is_checked = True
             
-            # グリッド配置 (キーにも名前を含めるのが重要)
-            with cols[i % 7]:
+            # 6で割った余りで配置
+            with cols[i % 6]:
                 if st.checkbox(label, value=is_checked, key=f"chk_{d_str}{form_key_suffix}"):
                     selected_dates_result.append(d_str)
 
@@ -220,7 +220,6 @@ with tab_input:
 
     # === 保存ボタン ===
     st.markdown("---")
-    # keyをつけないと、ボタン押下時にアプリ全体がリロードされて入力内容が飛ぶことがあるので注意
     if st.button("上記の内容で保存して更新", type="primary", key=f"btn{form_key_suffix}"):
         if not input_name:
             st.error("エラー: メンバー名が入力されていません。")
@@ -229,10 +228,10 @@ with tab_input:
                 try:
                     res = update_member_data(sheet_url, input_name, new_progress, new_power, new_answer, selected_dates_result, new_max_count)
                     st.success(f"完了: {input_name} さんの情報を{res}しました！")
-                    st.cache_data.clear() # キャッシュクリアしてデータを再読み込みさせる
+                    st.cache_data.clear()
                 except Exception as e:
                     st.error(f"書き込みエラー: {e}")
-                    
+
 # -----------------
 # Tab 2: 選抜実行
 # -----------------
@@ -251,7 +250,7 @@ with tab_calc:
                 dates_str = str(row.get('指定日', ''))
                 
                 # 上限回数の取得
-                max_c = 14
+                max_c = len(target_dates)
                 if '上限回数' in row and str(row['上限回数']).isdigit():
                     max_c = int(row['上限回数'])
                 
@@ -263,7 +262,7 @@ with tab_calc:
                     'max_count': max_c
                 }
                 
-            # 2. ランキング作成 & 参加可能日判定
+            # 2. ランキング作成
             ranked_members = []
             for name, data in members_dict.items():
                 availability = {}
@@ -291,7 +290,7 @@ with tab_calc:
                     'status': {} 
                 })
             
-            # ソート: 進捗 > 戦力
+            # ソート
             ranked_members.sort(key=lambda x: (x['progress_val'], x['power_val']), reverse=True)
             
             # 3. 固定・変動の振り分け
@@ -300,44 +299,42 @@ with tab_calc:
             all_dates_keys = [d.strftime('%Y-%m-%d') for d in target_dates]
             
             for m in ranked_members:
-                # 固定条件: トップ10以内 かつ 全日参加可能 かつ 上限回数が期間(14)以上
+                # 固定条件: 日曜を除く全日程に参加可能 & 上限回数クリア
                 is_all_ok = all(m['availability'][k] for k in all_dates_keys)
                 if len(fixed_members) < 10 and is_all_ok and m['max_count'] >= len(target_dates):
                     fixed_members.append(m)
                 else:
                     variable_candidates.append(m)
             
-            # 4. 日ごとの選抜処理
+            # 4. 日ごとの選抜
             daily_schedule = {}
             
             for d in target_dates:
                 d_str = d.strftime('%Y-%m-%d')
                 todays_team = []
                 
-                # (A) 固定メンバー
+                # (A) 固定
                 for fm in fixed_members:
                     todays_team.append(fm['name'])
                     fm['count'] += 1
                     fm['status'][d_str] = "◎"
                 
-                # (B) 変動枠
+                # (B) 変動
                 slots_needed = 20 - len(todays_team)
                 
-                # その日の候補者抽出
-                # 条件: 1.その日がOK  2.現在の上限回数に達していない
                 todays_candidates = []
                 for m in variable_candidates:
                     if m['availability'][d_str] and m['count'] < m['max_count']:
                         todays_candidates.append(m)
                 
-                # 選抜漏れ等のステータス初期化
+                # ステータス更新
                 for m in variable_candidates:
                     if not m['availability'][d_str]:
-                        m['status'][d_str] = "✕" # そもそも不可
+                        m['status'][d_str] = "✕"
                     elif m['count'] >= m['max_count']:
-                        m['status'][d_str] = "済" # 回数制限到達
+                        m['status'][d_str] = "済"
                     else:
-                        m['status'][d_str] = "△" # 参加可能だが未選出
+                        m['status'][d_str] = "△"
                 
                 if slots_needed > 0:
                     if mode == "平等モード":
@@ -369,7 +366,7 @@ with tab_calc:
             df_matrix = pd.DataFrame(matrix_data)
             st.dataframe(df_matrix, use_container_width=True)
 
-            # 6. コピー用テキスト
+            # 6. コピー用
             st.markdown("---")
             st.subheader("📋 告知用コピーテキスト")
             
