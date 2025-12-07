@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import re
 
 # ---------------------------------------------------------
@@ -20,7 +20,6 @@ def load_data(sheet_url):
     sh = client.open_by_url(sheet_url)
     worksheet = sh.get_worksheet(0)
     data = worksheet.get_all_records()
-    # データが空の場合のハンドリング
     if not data:
         return pd.DataFrame(columns=['名前', 'ステージ進捗', '戦力', '回答内容', '指定日', '更新日時'])
     return pd.DataFrame(data)
@@ -30,24 +29,24 @@ def update_member_data(sheet_url, name, progress, power, answer, specific_dates)
     sh = client.open_by_url(sheet_url)
     worksheet = sh.get_worksheet(0)
     
-    # 全データを取得して検索
-    # get_all_recordsだと行番号がわからないため、cell検索を使うか、全取得してロジックで探す
+    # 日本時間 (JST) の現在時刻を取得
+    JST = timezone(timedelta(hours=9), 'JST')
+    now_str = datetime.now(JST).strftime('%Y-%m-%d %H:%M:%S')
+    
+    dates_str = ",".join(specific_dates)
+    
     try:
         cell = worksheet.find(name)
         row = cell.row
         # 更新
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        dates_str = ",".join(specific_dates)
         worksheet.update_cell(row, 2, progress)
         worksheet.update_cell(row, 3, power)
         worksheet.update_cell(row, 4, answer)
         worksheet.update_cell(row, 5, dates_str)
-        worksheet.update_cell(row, 6, now_str)
+        worksheet.update_cell(row, 6, now_str) # 日本時間で記録
         return "更新"
     except gspread.exceptions.CellNotFound:
         # 新規追加
-        now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        dates_str = ",".join(specific_dates)
         worksheet.append_row([name, progress, power, answer, dates_str, now_str])
         return "新規登録"
 
@@ -100,7 +99,6 @@ target_dates = generate_date_range(start_date, end_date)
 # --- データ読み込み ---
 try:
     df = load_data(sheet_url)
-    # st.toast("最新データを読み込みました", icon="✅") 
 except Exception as e:
     st.error(f"データ読み込みエラー: {e}")
     st.stop()
@@ -114,19 +112,16 @@ tab_input, tab_calc, tab_list = st.tabs(["📝 メンバー入力", "🚀 選抜
 with tab_input:
     st.header("情報の登録・更新")
     
-    # モード切替
     existing_names = df['名前'].tolist() if not df.empty and '名前' in df.columns else []
     select_mode = st.radio("モード", ["既存メンバーを編集", "新規メンバー登録"], horizontal=True)
     
     input_name = ""
     current_data = {}
     
-    # 入力項目の初期値を決定
     if select_mode == "既存メンバーを編集":
         if existing_names:
             target_name = st.selectbox("名前を選択", existing_names)
             input_name = target_name
-            # データ取得
             if not df.empty:
                 row_data = df[df['名前'] == target_name].iloc[0]
                 current_data = {
@@ -138,11 +133,9 @@ with tab_input:
         else:
             st.info("データがありません。「新規メンバー登録」を行ってください。")
     else:
-        # 新規登録モード
         input_name = st.text_input("新しいメンバー名を入力してください")
         current_data = {'progress': "40-60", 'power': "", 'answer': "いつでも", 'dates': []}
 
-    # --- 入力フォーム (常に表示) ---
     st.markdown("---")
     with st.form("entry_form"):
         st.caption(f"以下の内容で「{input_name if input_name else '（名前未入力）'}」の情報を保存します。")
@@ -151,19 +144,16 @@ with tab_input:
         new_progress = c1.text_input("ステージ進捗", value=current_data.get('progress', ''))
         new_power = c2.text_input("戦力", value=current_data.get('power', ''))
         
-        # 回答の選択肢ロジック（エラー回避）
         options = ["いつでも", "日にち指定", "無理/辞退"]
         val = current_data.get('answer', 'いつでも')
-        # スプレッドシートの値が選択肢にない場合（周遊中など）は、デフォルト(0番目)にするか、安全策をとる
         try:
             idx = options.index(val)
         except ValueError:
-            idx = 0 # 該当なしなら「いつでも」を選択状態にする（保存時に上書きされるので注意）
+            idx = 0
             st.warning(f"注意: シート上の回答「{val}」は選択肢にないため、初期表示が「いつでも」になっています。")
 
         new_answer = c3.radio("回答", options, index=idx)
         
-        # 日付選択
         date_options = [d.strftime('%Y-%m-%d') for d in target_dates]
         default_dates = [d for d in current_data.get('dates', []) if d in date_options]
         
@@ -171,7 +161,6 @@ with tab_input:
         if new_answer == "日にち指定":
             new_dates = st.multiselect("参加可能日", date_options, default=default_dates)
         
-        # 保存ボタン
         submitted = st.form_submit_button("保存して更新")
         
         if submitted:
@@ -182,8 +171,7 @@ with tab_input:
                     try:
                         res = update_member_data(sheet_url, input_name, new_progress, new_power, new_answer, new_dates)
                         st.success(f"完了: {input_name} さんの情報を{res}しました！")
-                        st.cache_data.clear() # キャッシュクリア
-                        # 少し待ってからリロード的な挙動が必要だが、メッセージだけで十分な場合も多い
+                        st.cache_data.clear()
                     except Exception as e:
                         st.error(f"書き込みエラー: {e}")
 
@@ -218,7 +206,6 @@ with tab_calc:
                 for d in target_dates:
                     d_str = d.strftime('%Y-%m-%d')
                     is_ok = False
-                    # 判定ロジック
                     if data['answer'] == "いつでも": is_ok = True
                     elif "無理" in data['answer'] or "辞退" in data['answer']: is_ok = False
                     elif data['answer'] == "日にち指定" and d_str in data['specific_dates']: is_ok = True
@@ -231,7 +218,7 @@ with tab_calc:
                     'power_val': parse_power(data['power']),
                     'availability': availability,
                     'count': 0,
-                    'status': {} # 結果ステータス格納用
+                    'status': {} 
                 })
             
             # ソート: 進捗 > 戦力
@@ -243,7 +230,6 @@ with tab_calc:
             all_dates_keys = [d.strftime('%Y-%m-%d') for d in target_dates]
             
             for m in ranked_members:
-                # 固定条件: トップ10以内 かつ 全日参加可能
                 if len(fixed_members) < 10 and all(m['availability'][k] for k in all_dates_keys):
                     fixed_members.append(m)
                 else:
@@ -260,65 +246,50 @@ with tab_calc:
                 for fm in fixed_members:
                     todays_team.append(fm['name'])
                     fm['count'] += 1
-                    fm['status'][d_str] = "◎" # 固定選出
+                    fm['status'][d_str] = "◎"
                 
                 # (B) 変動枠
                 slots_needed = 20 - len(todays_team)
-                
-                # その日の候補者
                 todays_candidates = [m for m in variable_candidates if m['availability'][d_str]]
                 
-                # 選抜漏れの人も含めてステータス初期化
+                # 選抜漏れ初期化
                 for m in variable_candidates:
                     if m['availability'][d_str]:
-                        m['status'][d_str] = "△" # 仮：参加可能だが未選出
+                        m['status'][d_str] = "△"
                     else:
-                        m['status'][d_str] = "✕" # 参加不可
+                        m['status'][d_str] = "✕"
                 
                 if slots_needed > 0:
-                    # モード別ソート
                     if mode == "平等モード":
                         todays_candidates.sort(key=lambda x: (x['count'], -x['progress_val'][0], -x['progress_val'][1], -x['power_val']))
-                    # 戦力優先なら既にranked_membersの順序のままでOK
                     
-                    # 枠埋め
                     for c in todays_candidates[:slots_needed]:
                         todays_team.append(c['name'])
                         c['count'] += 1
-                        c['status'][d_str] = "〇" # 変動選出
+                        c['status'][d_str] = "〇"
                 
                 daily_schedule[d_str] = todays_team
 
-            # ------------------------------------------------
-            # 5. 結果表示（マトリクス表の作成）
-            # ------------------------------------------------
+            # 5. 結果表示（マトリクス表）
             st.subheader("📊 選抜結果マトリクス表")
             st.caption("記号の意味： ◎=固定枠, 〇=変動枠, △=選考漏れ, ✕=不参加")
 
-            # 表データの作成
             matrix_data = []
-            # ランキング順（固定→変動上位...）に並べて表示
             display_order = fixed_members + variable_candidates
             
             for m in display_order:
                 row = {"名前": m['name']}
-                # 各日付のステータスを埋める
                 for d in target_dates:
                     d_str = d.strftime('%Y-%m-%d')
-                    # 日付ヘッダーを短くする (例: 12/07)
                     short_date = d.strftime('%m/%d')
                     row[short_date] = m['status'].get(d_str, "-")
-                
-                # 集計情報もあると便利
                 row["出撃数"] = m['count']
                 matrix_data.append(row)
             
             df_matrix = pd.DataFrame(matrix_data)
             st.dataframe(df_matrix, use_container_width=True)
 
-            # ------------------------------------------------
-            # 6. コピー用テキスト出力
-            # ------------------------------------------------
+            # 6. コピー用テキスト
             st.markdown("---")
             st.subheader("📋 告知用コピーテキスト")
             
