@@ -77,7 +77,7 @@ def parse_power(power_val):
     except: return 0.0
 
 def generate_date_range(start_date, end_date):
-    """開始日から終了日までの日付リストを生成（日曜日は除外）"""
+    """開始日から終了日までの日付リストを生成"""
     delta = end_date - start_date
     dates = []
     for i in range(delta.days + 1):
@@ -90,7 +90,7 @@ def generate_date_range(start_date, end_date):
 # 3. アプリ画面構成
 # ---------------------------------------------------------
 st.set_page_config(page_title="聖戦管理App", layout="wide")
-st.title("🛡️ 聖戦メンバー管理 (日曜除外版)")
+st.title("🛡️ 聖戦メンバー管理")
 
 # --- 設定 ---
 if "sheet_url" in st.secrets:
@@ -183,7 +183,7 @@ with tab_input:
     selected_dates_result = []
     
     if new_answer == "条件付き":
-        st.markdown("##### 📅 参加可能日を選択 (日曜除く)")
+        st.markdown("##### 📅 参加可能日を選択")
         
         # 曜日一括選択（日曜はリストから削除）
         weekdays_map = {0: "月", 1: "火", 2: "水", 3: "木", 4: "金", 5: "土"}
