@@ -392,7 +392,7 @@ with tab_calc:
             df_matrix.index = df_matrix.index + 1
             st.dataframe(df_matrix, use_container_width=True)
 
-            # 6. コピー用 (修正版：一括プレーンテキスト)
+            # 6. コピー用 (修正版：日程別・1行プレーンテキスト)
             st.markdown("---")
             st.subheader("📋 告知用コピーテキスト")
             
@@ -402,10 +402,9 @@ with tab_calc:
             st.markdown("##### 🔰 固定メンバー一覧")
             st.code(", ".join(fixed_names), language="text")
             
-            # ボックス2: 日別リスト（全日程まとめ）
-            st.markdown("##### 📅 日別参加メンバー (一括コピー用)")
+            # ボックス2: 日別リスト
+            st.markdown("##### 📅 日別参加メンバー")
             
-            lines = []
             for d in target_dates:
                 d_str = d.strftime('%Y-%m-%d')
                 day_jp = ["月","火","水","木","金","土","日"][d.weekday()]
@@ -413,12 +412,12 @@ with tab_calc:
                 all_mems = daily_schedule.get(d_str, [])
                 variable_mems = [n for n in all_mems if n not in fixed_names]
                 
-                # 1行のテキストを作成。見やすさのため日付とメンバーを1行にまとめる
+                # 日付とメンバーを1行につなげる
+                # 例: 12/29(月) 固定メンバー、A, B, C... (計20名)
                 line = f"{d.strftime('%m/%d')}({day_jp}) 固定メンバー、{', '.join(variable_mems)} (計{len(all_mems)}名)"
-                lines.append(line)
-            
-            # 全行を改行コードで連結して、1つのコードブロックとして表示
-            st.code("\n".join(lines), language="text")
+                
+                # st.codeで出力（コピーボタン付き、language="text"でハイライトなし）
+                st.code(line, language="text")
 
 # -----------------
 # Tab 3: 一覧確認
