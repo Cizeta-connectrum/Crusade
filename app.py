@@ -238,6 +238,7 @@ with tab_input:
 with tab_calc:
     st.header("メンバー選抜")
     mode = st.radio("選抜モード", ["戦力優先", "平等モード"], horizontal=True)
+    st.caption("※「戦力優先」モードでは、参加日が限られる「条件付き」のメンバーを優先的に確保した上で、戦力順に選抜します。")
     
     if st.button("計算実行"):
         if df.empty:
@@ -280,12 +281,14 @@ with tab_calc:
                     
                     availability[d_str] = is_ok
                 
+                # 【修正1】ここで answer を持たせる
                 ranked_members.append({
                     'name': name,
                     'progress_val': parse_stage(data['progress']),
                     'power_val': parse_power(data['power']),
                     'availability': availability,
                     'max_count': data['max_count'],
+                    'answer': data['answer'], # ソート用に回答タイプを保持
                     'count': 0,
                     'status': {} 
                 })
@@ -327,7 +330,7 @@ with tab_calc:
                     if m['availability'][d_str] and m['count'] < m['max_count']:
                         todays_candidates.append(m)
                 
-                # ステータス更新
+                # ステータス更新（初期化）
                 for m in variable_candidates:
                     if not m['availability'][d_str]:
                         m['status'][d_str] = "✕"
@@ -337,8 +340,19 @@ with tab_calc:
                         m['status'][d_str] = "△"
                 
                 if slots_needed > 0:
+                    # 【修正2】選抜ロジックの修正
                     if mode == "平等モード":
                         todays_candidates.sort(key=lambda x: (x['count'], -x['progress_val'][0], -x['progress_val'][1], -x['power_val']))
+                    else:
+                        # 戦力優先モード改：条件付き優先 > ステージ > 戦力
+                        # x['answer'] != '条件付き' は、条件付きならFalse(0)、それ以外ならTrue(1)となるため
+                        # 昇順ソートで「条件付き」が先に来る。
+                        todays_candidates.sort(key=lambda x: (
+                            x['answer'] != '条件付き', 
+                            -x['progress_val'][0], 
+                            -x['progress_val'][1], 
+                            -x['power_val']
+                        ))
                     
                     for c in todays_candidates[:slots_needed]:
                         todays_team.append(c['name'])
