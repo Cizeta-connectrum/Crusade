@@ -164,7 +164,6 @@ with tab_input:
     new_progress = c1.text_input("ステージ進捗", value=current_data.get('progress', ''), key=f"prog{form_key_suffix}")
     new_power = c2.text_input("戦力", value=current_data.get('power', ''), key=f"pow{form_key_suffix}")
     
-    # 【変更点1】選択肢に「回答なし」を追加
     options = ["いつでも", "条件付き", "無理/辞退", "回答なし"]
     current_ans = current_data.get('answer', 'いつでも')
     try:
@@ -182,7 +181,7 @@ with tab_input:
     except:
         raw_max = max_limit
 
-    # 【変更点2】「回答なし」の場合も上限を0にする（辞退扱い）
+    # 「回答なし」の場合も上限を0にする
     if new_answer in ["無理/辞退", "回答なし"]:
         default_max = 0
     else:
@@ -286,7 +285,6 @@ with tab_calc:
                     d_str = d.strftime('%Y-%m-%d')
                     is_ok = False
                     
-                    # 【変更点3】「回答なし」も選抜対象外にする
                     if "無理" in data['answer'] or "辞退" in data['answer'] or "回答なし" in data['answer']:
                         is_ok = False
                     elif data['answer'] == "いつでも":
@@ -394,7 +392,7 @@ with tab_calc:
             df_matrix.index = df_matrix.index + 1
             st.dataframe(df_matrix, use_container_width=True)
 
-            # 6. コピー用 (分割表示)
+            # 6. コピー用 (修正版：一括プレーンテキスト)
             st.markdown("---")
             st.subheader("📋 告知用コピーテキスト")
             
@@ -404,25 +402,23 @@ with tab_calc:
             st.markdown("##### 🔰 固定メンバー一覧")
             st.code(", ".join(fixed_names), language="text")
             
-            # 文言修正
-            st.markdown("##### 📅 日別参加メンバー")
+            # ボックス2: 日別リスト（全日程まとめ）
+            st.markdown("##### 📅 日別参加メンバー (一括コピー用)")
             
-            # 日ごとのボックスを作成
+            lines = []
             for d in target_dates:
                 d_str = d.strftime('%Y-%m-%d')
                 day_jp = ["月","火","水","木","金","土","日"][d.weekday()]
                 
-                # その日の全メンバーから、固定メンバーを除いたリストを作成
                 all_mems = daily_schedule.get(d_str, [])
                 variable_mems = [n for n in all_mems if n not in fixed_names]
                 
-                # 表示テキスト作成
-                header = f"{d.strftime('%m/%d')}({day_jp}) 合計{len(all_mems)}名"
-                body = f"固定メンバー、{', '.join(variable_mems)}"
-                
-                # 日付を見出しとして表示し、その下にコピーボタン付きボックス(st.code)を表示
-                st.text(header)
-                st.code(body, language="text")
+                # 1行のテキストを作成。見やすさのため日付とメンバーを1行にまとめる
+                line = f"{d.strftime('%m/%d')}({day_jp}) 固定メンバー、{', '.join(variable_mems)} (計{len(all_mems)}名)"
+                lines.append(line)
+            
+            # 全行を改行コードで連結して、1つのコードブロックとして表示
+            st.code("\n".join(lines), language="text")
 
 # -----------------
 # Tab 3: 一覧確認
