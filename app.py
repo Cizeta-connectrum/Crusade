@@ -164,30 +164,33 @@ with tab_input:
     new_progress = c1.text_input("ステージ進捗", value=current_data.get('progress', ''), key=f"prog{form_key_suffix}")
     new_power = c2.text_input("戦力", value=current_data.get('power', ''), key=f"pow{form_key_suffix}")
     
-    options = ["いつでも", "条件付き", "無理/辞退"]
+    # 【変更点1】選択肢に「回答なし」を追加
+    options = ["いつでも", "条件付き", "無理/辞退", "回答なし"]
     current_ans = current_data.get('answer', 'いつでも')
     try:
         idx = options.index(current_ans) if current_ans in options else 0
     except: idx = 0
     new_answer = c3.selectbox("回答タイプ", options, index=idx, key=f"ans{form_key_suffix}")
 
-    # --- 修正箇所 start ---
     # 上限回数のデフォルト値（日曜除外後の日数）
-    max_limit = len(target_dates)
+    max_limit = int(len(target_dates))
     
-    # DBから値を取得。なければ max_limit
-    raw_max = current_data.get('max_count', max_limit)
-    
-    # 辞退なら0
-    if new_answer == "無理/辞退":
+    # DBから値を取得
+    try:
+        raw_val = current_data.get('max_count', max_limit)
+        raw_max = int(raw_val)
+    except:
+        raw_max = max_limit
+
+    # 【変更点2】「回答なし」の場合も上限を0にする（辞退扱い）
+    if new_answer in ["無理/辞退", "回答なし"]:
         default_max = 0
     else:
-        # DBの値が現在の期間(max_limit)より大きい場合、max_limit に丸める（エラー回避）
+        # 小さいほうを採用（絶対に max_limit を超えないようにする）
         default_max = min(raw_max, max_limit)
 
     # 入力上限も日曜除外後の日数に合わせる
     new_max_count = c4.number_input("上限回数", min_value=0, max_value=max_limit, value=default_max, key=f"max{form_key_suffix}")
-    # --- 修正箇所 end ---
     
     st.caption("※「期間を通して2〜3回」の場合は、ここに「3」と入力してください。")
 
@@ -283,7 +286,8 @@ with tab_calc:
                     d_str = d.strftime('%Y-%m-%d')
                     is_ok = False
                     
-                    if "無理" in data['answer'] or "辞退" in data['answer']:
+                    # 【変更点3】「回答なし」も選抜対象外にする
+                    if "無理" in data['answer'] or "辞退" in data['answer'] or "回答なし" in data['answer']:
                         is_ok = False
                     elif data['answer'] == "いつでも":
                         is_ok = True
