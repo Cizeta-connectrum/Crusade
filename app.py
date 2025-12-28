@@ -392,7 +392,7 @@ with tab_calc:
             df_matrix.index = df_matrix.index + 1
             st.dataframe(df_matrix, use_container_width=True)
 
-            # 6. コピー用 (修正版：日程別・1行プレーンテキスト)
+            # 6. コピー用 (修正版：日付見出し+プレーンテキスト)
             st.markdown("---")
             st.subheader("📋 告知用コピーテキスト")
             
@@ -412,11 +412,12 @@ with tab_calc:
                 all_mems = daily_schedule.get(d_str, [])
                 variable_mems = [n for n in all_mems if n not in fixed_names]
                 
-                # 日付とメンバーを1行につなげる
-                # 例: 12/29(月) 固定メンバー、A, B, C... (計20名)
-                line = f"{d.strftime('%m/%d')}({day_jp}) 固定メンバー、{', '.join(variable_mems)} (計{len(all_mems)}名)"
+                # 見出しとして日付を表示（コピー対象外）
+                st.markdown(f"**{d.strftime('%m/%d')}({day_jp})**")
                 
-                # st.codeで出力（コピーボタン付き、language="text"でハイライトなし）
+                # コピー対象テキスト（日付なし、末尾修正）
+                line = f"固定メンバー、{', '.join(variable_mems)} よろしくお願いします。"
+                
                 st.code(line, language="text")
 
 # -----------------
